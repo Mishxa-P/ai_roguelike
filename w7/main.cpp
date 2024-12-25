@@ -27,7 +27,7 @@ int main(int /*argc*/, const char ** /*argv*/)
 {
   int width = 1920;
   int height = 1080;
-  InitWindow(width, height, "w6 AI MIPT");
+  InitWindow(width, height, "HW6");
 
   const int scrWidth = GetMonitorWidth(0);
   const int scrHeight = GetMonitorHeight(0);
@@ -40,8 +40,8 @@ int main(int /*argc*/, const char ** /*argv*/)
 
   flecs::world ecs;
   {
-    constexpr size_t dungWidth = 100;
-    constexpr size_t dungHeight = 100;
+    constexpr size_t dungWidth = 200;
+    constexpr size_t dungHeight = 200;
     char *tiles = new char[dungWidth * dungHeight];
     gen_drunk_dungeon(tiles, dungWidth, dungHeight);
     init_dungeon(ecs, tiles, dungWidth, dungHeight);

@@ -6,8 +6,29 @@
 #include "dungeonGen.h"
 #include "dungeonUtils.h"
 #include "pathfinder.h"
+#include "math.h"
 
 constexpr float tile_size = 64.f;
+
+constexpr Color PATH_COLOR = Color(255, 255, 255, 100);
+static void draw_path(std::vector<IVec2> path)
+{
+    if (path.empty())
+    {
+        return;
+    }
+    Rectangle highlight{ path[0].x * tile_size, path[0].y * tile_size, tile_size, tile_size };
+    DrawRectangleRec(highlight, PATH_COLOR);
+    for (size_t i = 1; i < path.size(); i++)
+    {
+        if (path[i] == path[i - 1])
+        {
+            continue;
+        }       
+        highlight = { path[i].x * tile_size, path[i].y * tile_size, tile_size, tile_size };
+        DrawRectangleRec(highlight, PATH_COLOR);
+    }
+}
 
 static void register_roguelike_systems(flecs::world &ecs)
 {
@@ -78,6 +99,10 @@ static void register_roguelike_systems(flecs::world &ecs)
       });
     });
 
+  static IVec2 from = { -1, -1 };
+  static IVec2 to = { -1, -1 };
+  static IVec2 hovered = { -1, -1 };
+
   ecs.system<const DungeonPortals, const DungeonData>()
     .each([&](const DungeonPortals &dp, const DungeonData &dd)
     {
@@ -134,6 +159,25 @@ static void register_roguelike_systems(flecs::world &ecs)
                      (fromCenter.y + toCenter.y) * 0.5f,
                      16, WHITE);
           }
+        }
+        hovered = { int(mousePosition.x / tile_size), int(mousePosition.y / tile_size) };
+      
+        if (IsMouseButtonPressed(0))
+            from = hovered;
+        else if (IsMouseButtonPressed(1))
+            to = hovered;
+        draw_path(find_path(dd, dp, from, to));
+        Rectangle hoveredRect{ hovered.x * tile_size, hovered.y * tile_size, tile_size, tile_size };
+        DrawRectangleLinesEx(hoveredRect, 8, WHITE);
+        if (from != IVec2{ -1, -1 })
+        {
+            Rectangle fromRect{ from.x * tile_size, from.y * tile_size, tile_size, tile_size };
+            DrawRectangleLinesEx(fromRect, 8, BLUE);
+        }
+        if (to != IVec2{ -1, -1 })
+        {
+            Rectangle toRect{ to.x * tile_size, to.y * tile_size, tile_size, tile_size };
+            DrawRectangleLinesEx(toRect, 8, ORANGE);
         }
       });
     });
