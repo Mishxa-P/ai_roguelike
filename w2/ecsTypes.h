@@ -3,6 +3,7 @@
 struct Position;
 struct MovePos;
 
+
 struct MovePos
 {
   int x = 0;
@@ -61,6 +62,7 @@ enum Actions
   EA_MOVE_UP,
   EA_MOVE_END,
   EA_ATTACK = EA_MOVE_END,
+  EA_SPAWN_ITEMS,
   EA_NUM
 };
 
@@ -112,3 +114,18 @@ struct Team
 
 struct TextureSource {};
 
+struct SpawnPos
+{
+    int x = 0;
+    int y = 0;
+};
+
+struct Gatherer
+{ 
+    int itemsCollected = 0;  
+};
+
+struct Waypoint
+{
+    flecs::entity nextWaypoint;
+};

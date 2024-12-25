@@ -60,6 +60,71 @@ static void create_player(flecs::world &ecs, int x, int y, const char *texture_s
     .set(MeleeDamage{50.f});
 }
 
+static void create_gatherer_beh(flecs::world& ecs, flecs::entity e)
+{
+    e.set(Gatherer{ 0 });
+    e.set(SpawnPos{ e.get<Position>()->x, e.get<Position>()->y });
+    e.set(Blackboard{});
+    BehNode* root =
+        selector({
+          sequence({
+            find_powerup_or_heal(e, 10.f, "item"),
+            move_to_entity(e, "item")
+          }),
+          sequence({
+            move_to_spawn(),
+            spawn_items()
+          })
+            });
+    e.set(BehaviourTree{ root });
+}
+
+static void create_guard_beh(flecs::entity e, flecs::entity start_waypoint)
+{
+    e.set(Blackboard{});
+    BehNode* root =
+        selector({
+          sequence({ 
+            find_enemy(e, 2.f, "attack_enemy"),
+            move_to_entity(e, "attack_enemy")
+          }),
+          sequence({ 
+            find_waypoint(e, start_waypoint, "next_waypoint"),
+            move_to_entity(e, "next_waypoint")
+          })
+            });
+    e.set(BehaviourTree{ root });
+}
+
+
+static void create_gatherer_visual_spawn_point(flecs::world& ecs, Color color, int x, int y)
+{
+     ecs.entity()
+        .set(Position{ x , y })
+        .set(Color{ color });
+}
+
+static flecs::entity create_waypoint(flecs::world& ecs, Color color, int x, int y)
+{
+    return ecs.entity()
+        .set(Position{ x , y })
+        .set(Waypoint{ flecs::entity::null() })
+        .set(Color{ color });
+}
+static flecs::entity create_waypoints(flecs::world& ecs, Color color, int start_point_x, int start_point_y, int wp_count, int max_x, int max_y)
+{
+    flecs::entity start_waypoint = create_waypoint(ecs, color, start_point_x, start_point_y);
+    flecs::entity last_waypoint = start_waypoint;
+    for (int i = 1; i < wp_count; ++i)
+    {
+        flecs::entity next_waypoint = create_waypoint(ecs, color, GetRandomValue(-max_x, max_x), GetRandomValue(-max_y, max_y));
+        last_waypoint.get_mut<Waypoint>()->nextWaypoint = next_waypoint;
+        last_waypoint = next_waypoint;
+    }
+    last_waypoint.get_mut<Waypoint>()->nextWaypoint = start_waypoint;
+    return start_waypoint;
+}
+
 static void create_heal(flecs::world &ecs, int x, int y, float amount)
 {
   ecs.entity()
@@ -133,10 +198,11 @@ void init_roguelike(flecs::world &ecs)
         UnloadTexture(texture);
       });
 
-  create_minotaur_beh(create_monster(ecs, 5, 5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, 10, -5, Color{0xee, 0x00, 0xee, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, -5, -5, Color{0x11, 0x11, 0x11, 0xff}, "minotaur_tex"));
-  create_minotaur_beh(create_monster(ecs, -5, 5, Color{0, 255, 0, 255}, "minotaur_tex"));
+
+  create_gatherer_beh(ecs, create_monster(ecs, -5, 5, Color{ 0xee, 0x00, 0xee, 0xff }, "minotaur_tex"));
+  create_gatherer_visual_spawn_point(ecs, Color{ 0xee, 0x00, 0xee, 0xff }, -5, 5);
+
+  create_guard_beh(create_monster(ecs, 2, 2, Color{ 0x05, 0x44, 0x44, 0xff }, "minotaur_tex"), create_waypoints(ecs, Color{ 0x05, 0x44, 0x44, 0xff }, 2, 2, 4, 5, 5));
 
   create_player(ecs, 0, 0, "swordsman_tex");
 
@@ -188,6 +254,7 @@ static void process_actions(flecs::world &ecs)
 {
   static auto processActions = ecs.query<Action, Position, MovePos, const MeleeDamage, const Team>();
   static auto checkAttacks = ecs.query<const MovePos, Hitpoints, const Team>();
+  static auto gathererSpawnItems = ecs.query<Gatherer, const Position, Action>();
   // Process all actions
   ecs.defer([&]
   {
@@ -209,6 +276,30 @@ static void process_actions(flecs::world &ecs)
       else
         mpos = nextPos;
     });
+    gathererSpawnItems.each([&](Gatherer& gatherer, const Position& pos, Action& a) {
+        if (a.action == EA_SPAWN_ITEMS) 
+        {
+            for (int32_t i = 0; i < gatherer.itemsCollected * 2; ++i) 
+            {
+                float dist = (static_cast<float>(rand()) / RAND_MAX) * 20.0f;
+                float angle = static_cast<float>(rand());
+                float randPointX = std::cos(angle) * dist;
+                float randPointY = std::sin(angle) * dist;
+                int intRandPointX = pos.x < randPointX ? std::floor(randPointX) : std::ceil(randPointX);
+                int intRandPointY = pos.y < randPointY ? std::floor(randPointY) : std::ceil(randPointY);
+                if (rand() % 2 == 0) 
+                {
+                    create_powerup(ecs, intRandPointX, intRandPointY, 10.f);
+                }
+                else 
+                {
+                    create_heal(ecs, intRandPointX, intRandPointY, 50.f);
+                }
+            }
+            gatherer.itemsCollected = 0;
+            a.action = EA_NOP;
+        }
+        });
     // now move
     processActions.each([&](Action &a, Position &pos, MovePos &mpos, const MeleeDamage &, const Team&)
     {
@@ -228,6 +319,7 @@ static void process_actions(flecs::world &ecs)
   });
 
   static auto playerPickup = ecs.query<const IsPlayer, const Position, Hitpoints, MeleeDamage>();
+  static auto gathererPickup = ecs.query<Gatherer, const Position, Hitpoints, MeleeDamage>();
   static auto healPickup = ecs.query<const Position, const HealAmount>();
   static auto powerupPickup = ecs.query<const Position, const PowerupAmount>();
   ecs.defer([&]
@@ -251,6 +343,27 @@ static void process_actions(flecs::world &ecs)
         }
       });
     });
+    gathererPickup.each([&](Gatherer& gatherer, const Position& pos, Hitpoints& hp, MeleeDamage& dmg)
+        {
+            healPickup.each([&](flecs::entity entity, const Position& ppos, const HealAmount& amt)
+                {
+                    if (pos == ppos)
+                    {
+                        hp.hitpoints += amt.amount;
+                        gatherer.itemsCollected += 1;
+                        entity.destruct();
+                    }
+                });
+            powerupPickup.each([&](flecs::entity entity, const Position& ppos, const PowerupAmount& amt)
+                {
+                    if (pos == ppos)
+                    {
+                        dmg.damage += amt.amount;
+                        gatherer.itemsCollected += 1;
+                        entity.destruct();
+                    }
+                });
+        });
   });
 }
 
