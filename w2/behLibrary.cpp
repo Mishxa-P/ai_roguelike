@@ -157,35 +157,6 @@ struct MoveToEntity : public BehNode
   }
 };
 
-//struct FindWaypoint : public BehNode
-//{
-//    size_t waypointEntityBb = size_t(-1);
-//    FindWaypoint(flecs::entity entity, flecs::entity startWaypoint, const char* bb_name)
-//    {
-//        waypointEntityBb = reg_entity_blackboard_var<flecs::entity>(entity, bb_name);
-//        entity.insert([&](Blackboard& bb)
-//            {
-//                bb.set<flecs::entity>(waypointEntityBb, startWaypoint);
-//            });
-//    }
-//    BehResult update(flecs::world& ecs, flecs::entity entity, Blackboard& bb) override
-//    {
-//        BehResult res = BEH_FAIL;
-//        entity.insert([&](Blackboard& bb)
-//            {
-//                flecs::entity currentWaypointEntity = bb.get<flecs::entity>(waypointEntityBb);
-//                currentWaypointEntity.insert([&](const Waypoint& waypoint)
-//                    {
-//                        if (ecs.is_valid(waypoint.nextWaypoint)) {
-//                            bb.set<flecs::entity>(waypointEntityBb, waypoint.nextWaypoint);
-//                            res = BEH_SUCCESS;
-//                        }
-//                    });
-//            });
-//        return res;
-//    }
-//};
-
 struct FindWaypoint : public BehNode
 {
     size_t waypointBb = size_t(-1);
@@ -206,7 +177,7 @@ struct FindWaypoint : public BehNode
                 {
                     bb.set<flecs::entity>(waypointBb, wp_entity.get<Waypoint>()->nextWaypoint);
                     Position newPos = *wp_entity.get<Waypoint>()->nextWaypoint.get<Position>();
-                    printf("New waypoint: {%i, %i}\n", newPos.x, newPos.y);
+                    printf("Next waypoint: {%i, %i}\n", newPos.x, newPos.y);
                 }
             });
         return BEH_SUCCESS;

@@ -199,8 +199,8 @@ void init_roguelike(flecs::world &ecs)
       });
 
 
-  create_gatherer_beh(ecs, create_monster(ecs, -5, 5, Color{ 0xee, 0x00, 0xee, 0xff }, "minotaur_tex"));
-  create_gatherer_visual_spawn_point(ecs, Color{ 0xee, 0x00, 0xee, 0xff }, -5, 5);
+  create_gatherer_beh(ecs, create_monster(ecs, 5, 5, Color{ 0xee, 0x00, 0xee, 0xff }, "minotaur_tex"));
+  create_gatherer_visual_spawn_point(ecs, Color{ 0xee, 0x00, 0xee, 0xff }, 5, 5);
 
   create_guard_beh(create_monster(ecs, 2, 2, Color{ 0x05, 0x44, 0x44, 0xff }, "minotaur_tex"), create_waypoints(ecs, Color{ 0x05, 0x44, 0x44, 0xff }, 2, 2, 4, 5, 5));
 
@@ -276,29 +276,31 @@ static void process_actions(flecs::world &ecs)
       else
         mpos = nextPos;
     });
-    gathererSpawnItems.each([&](Gatherer& gatherer, const Position& pos, Action& a) {
-        if (a.action == EA_SPAWN_ITEMS) 
+    gathererSpawnItems.each([&](Gatherer& gatherer, const Position& pos, Action& a) 
         {
-            for (int32_t i = 0; i < gatherer.itemsCollected * 2; ++i) 
-            {
-                float dist = (static_cast<float>(rand()) / RAND_MAX) * 20.0f;
-                float angle = static_cast<float>(rand());
-                float randPointX = std::cos(angle) * dist;
-                float randPointY = std::sin(angle) * dist;
-                int intRandPointX = pos.x < randPointX ? std::floor(randPointX) : std::ceil(randPointX);
-                int intRandPointY = pos.y < randPointY ? std::floor(randPointY) : std::ceil(randPointY);
-                if (rand() % 2 == 0) 
-                {
-                    create_powerup(ecs, intRandPointX, intRandPointY, 10.f);
-                }
-                else 
-                {
-                    create_heal(ecs, intRandPointX, intRandPointY, 50.f);
-                }
-            }
-            gatherer.itemsCollected = 0;
-            a.action = EA_NOP;
+        if (a.action != EA_SPAWN_ITEMS) 
+        {
+            return;
         }
+        for (int32_t i = 0; i < gatherer.itemsCollected * 2; i++)
+        {
+            float dist = (static_cast<float>(rand()) / RAND_MAX) * 20.0f;
+            float angle = static_cast<float>(rand());
+            float randPointX = std::cos(angle) * dist;
+            float randPointY = std::sin(angle) * dist;
+            int intRandPointX = pos.x < randPointX ? std::floor(randPointX) : std::ceil(randPointX);
+            int intRandPointY = pos.y < randPointY ? std::floor(randPointY) : std::ceil(randPointY);
+            if (rand() % 2 == 0)
+            {
+                create_powerup(ecs, intRandPointX, intRandPointY, 10.f);
+            }
+            else
+            {
+                create_heal(ecs, intRandPointX, intRandPointY, 50.f);
+            }
+        }
+        gatherer.itemsCollected = 0;
+        a.action = EA_NOP;    
         });
     // now move
     processActions.each([&](Action &a, Position &pos, MovePos &mpos, const MeleeDamage &, const Team&)
