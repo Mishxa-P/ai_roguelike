@@ -10,10 +10,24 @@
 #include "dungeonGen.h"
 #include "dungeonUtils.h"
 
+enum class Algorithm
+{
+    A,
+    AWA
+};
+
+static const int AWA_MAX_HITS = 10;
+
 template<typename T>
 static size_t coord_to_idx(T x, T y, size_t w)
 {
   return size_t(y) * w + size_t(x);
+}
+
+template <typename T>
+static T idx_to_coord(size_t idx, size_t w)
+{
+    return T{ (decltype(T{}.x))(idx % w), (decltype(T{}.y))(idx / w) };
 }
 
 static void draw_nav_grid(const char *input, size_t width, size_t height)
@@ -186,10 +200,186 @@ static std::vector<Position> find_path_a_star(const char *input, size_t width, s
   return std::vector<Position>();
 }
 
-void draw_nav_data(const char *input, size_t width, size_t height, Position from, Position to, float weight)
+std::vector<Position> find_path_awa_star(const char* input, size_t width, size_t height, Position from, Position to, float weight) 
+{
+    if (from.x < 0 || from.y < 0 || from.x >= int(width) || from.y >= int(height) ||
+        input[coord_to_idx(from.x, from.y, width)] == '#' ||
+        to.x < 0 || to.y < 0 || to.x >= int(width) || to.y >= int(height) ||
+        input[coord_to_idx(to.x, to.y, width)] == '#') 
+    {
+        return {};
+    }
+
+    size_t inpSize = width * height;
+    std::vector<float> g(inpSize, std::numeric_limits<float>::max());
+    std::vector<float> f(inpSize, std::numeric_limits<float>::max());
+    std::vector<float> fw(inpSize, std::numeric_limits<float>::max());
+    std::vector<Position> prev(inpSize, { -1, -1 });
+
+    auto get_idx = [&](const Position& p) { return coord_to_idx(p.x, p.y, width); };
+    auto get_g = [&](const Position& p) { return g[get_idx(p)]; };
+    auto get_f = [&](const Position& p) { return f[get_idx(p)]; };
+    auto get_fw = [&](const Position& p) { return fw[get_idx(p)]; };
+
+    g[get_idx(from)] = 0;
+    f[get_idx(from)] = heuristic(from, to);
+    fw[get_idx(from)] = weight * heuristic(from, to);
+
+    size_t incumbent = -1;
+    size_t hits = 0;
+    std::vector<Position> openList = { from };
+    std::vector<Position> closedList;
+
+    while (!openList.empty())
+    {
+        auto bestIt = std::min_element(openList.begin(), openList.end(), [&](const Position& a, const Position& b) 
+            {
+            return get_fw(a) < get_fw(b);
+            });
+
+        Position curPos = *bestIt;
+        openList.erase(bestIt);
+
+        if (incumbent != -1 && get_f(curPos) >= get_f(Position{ static_cast<int>(incumbent % width), static_cast<int>(incumbent / width) })) 
+        {
+            continue;
+        }
+
+        size_t idx = coord_to_idx(curPos.x, curPos.y, width);
+        const Rectangle rect = { float(curPos.x), float(curPos.y), 1.f, 1.f };
+        DrawRectangleRec(rect, Color{ uint8_t(g[idx]), uint8_t(g[idx]), 0, 100 });
+
+        if (std::find(closedList.begin(), closedList.end(), curPos) != closedList.end()) {
+            continue;
+        }
+        closedList.push_back(curPos);
+
+        auto check_neighbor = [&](Position p)
+            {
+            if (p.x < 0 || p.y < 0 || p.x >= int(width) || p.y >= int(height) || input[get_idx(p)] == '#') 
+            {
+                return;
+            }
+
+            size_t idx = get_idx(p);
+            float edgeWeight = input[idx] == 'o' ? 10.f : 1.f;
+            float gScore = get_g(curPos) + 1.0f * edgeWeight;
+
+            if (p == to)
+            {
+                g[idx] = f[idx] = fw[idx] = gScore;
+                prev[idx] = curPos;
+                incumbent = idx;
+                ++hits;
+                return;
+            }
+
+            auto in_open = std::find(openList.begin(), openList.end(), p) != openList.end();
+            auto in_closed = std::find(closedList.begin(), closedList.end(), p) != closedList.end();
+
+            if ((in_open || in_closed) && g[idx] > gScore) 
+            {
+                g[idx] = gScore;
+                f[idx] = gScore + heuristic(p, to);
+                fw[idx] = gScore + weight * heuristic(p, to);
+                prev[idx] = curPos;
+                if (in_closed) 
+                {
+                    closedList.erase(std::remove(closedList.begin(), closedList.end(), p), closedList.end());
+                }
+                if (!in_open) 
+                {
+                    openList.push_back(p);
+                }
+            }
+            else if (!in_open && !in_closed) 
+            {
+                g[idx] = gScore;
+                f[idx] = gScore + heuristic(p, to);
+                fw[idx] = gScore + weight * heuristic(p, to);
+                prev[idx] = curPos;
+                openList.push_back(p);
+            }
+            };
+
+        check_neighbor({ curPos.x + 1, curPos.y });
+        check_neighbor({ curPos.x - 1, curPos.y });
+        check_neighbor({ curPos.x, curPos.y + 1 });
+        check_neighbor({ curPos.x, curPos.y - 1 });
+
+        if (hits >= AWA_MAX_HITS) 
+        {
+            break;
+        }
+    }
+    return hits > 0 ? reconstruct_path(prev, to, width) : std::vector<Position>{};
+}
+
+std::vector<float> choose_best_weights(size_t width, size_t height, Algorithm alg, int nmaps, const std::vector<float>& ws,
+    const std::vector<float>& percs)
+{
+    std::vector<char> navGrid(width * height);
+    auto findPath = [&alg](const std::vector<char>& grid, size_t w, size_t h, const Position& from, const Position& to, float weight) -> std::vector<Position> 
+        {
+        switch (alg) 
+        {
+        case Algorithm::A:
+            return find_path_a_star(grid.data(), w, h, from, to, weight);
+        case Algorithm::AWA:
+            return find_path_awa_star(grid.data(), w, h, from, to, weight);
+        }
+        };
+
+    std::vector<float> freqs(ws.size(), 0.f);
+    for (int imap = 0; imap < nmaps; imap++)
+    {
+        gen_drunk_dungeon(navGrid.data(), width, height, 24, 150, false);
+        spill_drunk_water(navGrid.data(), width, height, 8, 10);
+
+        Position from = dungeon::find_walkable_tile(navGrid.data(), width, height);
+        Position to = dungeon::find_walkable_tile(navGrid.data(), width, height);
+
+        std::vector<Position> basePath = findPath(navGrid, width, height, from, to, 1.f);
+
+        for (size_t i = 0; i < ws.size(); i++)
+        {
+            std::vector<Position> path = findPath(navGrid, width, height, from, to, ws[i]);
+            if (path == basePath) 
+            {
+                freqs[i] += 1.f / static_cast<float>(nmaps); 
+            }
+        }
+    }
+
+    std::vector<float> bestWs(percs.size(), 1.f);
+    for (size_t i = 0; i < ws.size(); i++) 
+    {
+        for (size_t j = 0; j < percs.size(); j++)
+        {
+            if (freqs[i] >= percs[j] && ws[i] > bestWs[j]) 
+            {
+                bestWs[j] = ws[i];
+            }
+        }
+    }
+
+    return bestWs;
+}
+
+void draw_nav_data(const char *input, size_t width, size_t height, Position from, Position to, float weight, Algorithm alg)
 {
   draw_nav_grid(input, width, height);
-  std::vector<Position> path = find_path_a_star(input, width, height, from, to, weight);
+  std::vector<Position> path;
+  switch (alg)
+  {
+    case Algorithm::A: 
+        path = find_path_a_star(input, width, height, from, to, weight); 
+        break;
+    case Algorithm::AWA: 
+        path = find_path_awa_star(input, width, height, from, to, weight); 
+        break;
+  }
+    
   //std::vector<Position> path = find_ida_star_path(input, width, height, from, to);
   draw_path(path);
 }
@@ -222,6 +412,16 @@ int main(int /*argc*/, const char ** /*argv*/)
   Camera2D camera = { {0, 0}, {0, 0}, 0.f, 1.f };
   //camera.offset = Vector2{ width * 0.5f, height * 0.5f };
   camera.zoom = float(height) / float(dungHeight);
+
+  Algorithm alg = Algorithm::AWA;
+
+  std::vector<float> ws{};
+  for (int i = 0; i < 20; ++i)
+      ws.push_back(float(1.1f + 0.1f * float(i)));
+  std::vector<float> percs = { 0.99f, 0.95f, 0.9f, 0.75f };
+  auto bestWs = choose_best_weights(dungWidth, dungHeight, alg, 20, ws, percs);
+  for (size_t i = 0; i < percs.size(); ++i)
+      printf("Best weight for %f = %f\n", percs[i], bestWs[i]);
 
   SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
   while (!WindowShouldClose())
@@ -262,10 +462,20 @@ int main(int /*argc*/, const char ** /*argv*/)
       weight = std::max(1.f, weight - 0.1f);
       printf("new weight %f\n", weight);
     }
+    if (IsKeyPressed(KEY_ONE))
+    {
+        alg = Algorithm::A;
+        printf("using A_star\n");
+    }
+    if (IsKeyPressed(KEY_TWO))
+    {
+        alg = Algorithm::AWA;
+        printf("using AWA_star\n");
+    }
     BeginDrawing();
       ClearBackground(BLACK);
       BeginMode2D(camera);
-        draw_nav_data(navGrid, dungWidth, dungHeight, from, to, weight);
+        draw_nav_data(navGrid, dungWidth, dungHeight, from, to, weight, alg);
       EndMode2D();
     EndDrawing();
   }
