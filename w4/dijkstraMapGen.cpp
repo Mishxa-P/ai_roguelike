@@ -1,6 +1,7 @@
 #include "dijkstraMapGen.h"
 #include "ecsTypes.h"
 #include "dungeonUtils.h"
+#include "math.h"
 
 template<typename Callable>
 static void query_dungeon_data(flecs::world &ecs, Callable c)
@@ -19,6 +20,7 @@ static void query_characters_positions(flecs::world &ecs, Callable c)
 }
 
 constexpr float invalid_tile_value = 1e5f;
+constexpr float invalid_range_tile_value = 1e15f;
 
 static void init_tiles(std::vector<float> &map, const DungeonData &dd)
 {
@@ -66,23 +68,23 @@ static void process_dmap(std::vector<float> &map, const DungeonData &dd)
   }
 }
 
-void dmaps::gen_player_approach_map(flecs::world &ecs, std::vector<float> &map)
+void dmaps::gen_enemy_approach_map(flecs::world &ecs, std::vector<float> &map, int team)
 {
   query_dungeon_data(ecs, [&](const DungeonData &dd)
   {
     init_tiles(map, dd);
     query_characters_positions(ecs, [&](const Position &pos, const Team &t)
     {
-      if (t.team == 0) // player team hardcode
+      if (t.team != team)
         map[pos.y * dd.width + pos.x] = 0.f;
     });
     process_dmap(map, dd);
   });
 }
 
-void dmaps::gen_player_flee_map(flecs::world &ecs, std::vector<float> &map)
+void dmaps::gen_enemy_flee_map(flecs::world &ecs, std::vector<float> &map, int team)
 {
-  gen_player_approach_map(ecs, map);
+  gen_enemy_approach_map(ecs, map, team);
   for (float &v : map)
     if (v < invalid_tile_value)
       v *= -1.2f;
@@ -90,6 +92,29 @@ void dmaps::gen_player_flee_map(flecs::world &ecs, std::vector<float> &map)
   {
     process_dmap(map, dd);
   });
+}
+
+void dmaps::gen_enemy_range_map(flecs::world& ecs, std::vector<float>& map, int team, float desiredDistance, float invalidDistance)
+{
+    query_dungeon_data(ecs, [&](const DungeonData& dd) {
+        init_tiles(map, dd);
+        query_characters_positions(ecs, [&](const Position& pos, const Team& t) {
+            if (t.team != team)
+            {
+                // We are ok with getting to any square close to an enemy, but not too close
+                for (int y = pos.y - ceilf(desiredDistance); y < pos.y + ceilf(desiredDistance); y++)
+                    for (int x = pos.x - ceilf(desiredDistance); x < pos.x + ceilf(desiredDistance); x++) {
+                        if (x < 0 || y < 0 || x >= (int)dd.width - 1 || y >= (int)dd.height - 1)
+                            continue;
+                        if (dist(pos, Position{ x, y }) <= invalidDistance)
+                            map[y * dd.width + x] = invalid_range_tile_value;
+                        else if (map[y * dd.width + x] == invalid_tile_value && dist(pos, Position{ x, y }) <= desiredDistance)
+                            map[y * dd.width + x] = 0.f;
+                    }
+            }
+            });
+        process_dmap(map, dd);
+        }); 
 }
 
 void dmaps::gen_hive_pack_map(flecs::world &ecs, std::vector<float> &map)
@@ -106,3 +131,43 @@ void dmaps::gen_hive_pack_map(flecs::world &ecs, std::vector<float> &map)
   });
 }
 
+static int get_range(int x, int y, int dest_x, int dest_y)
+{
+    return abs(x - dest_x) + abs(y - dest_y);
+}
+
+static bool is_tile_in_range(int x, int y, int dest_x, int dest_y, int max_dist)
+{
+    return abs(x - dest_x) + abs(y - dest_y) <= max_dist;
+}
+
+void dmaps::gen_explore_map(flecs::world& ecs, std::vector<float>& map)
+{
+    static auto playerQuery = ecs.query<const Position, ExploreMap>();
+    query_dungeon_data(ecs, [&](const DungeonData& dd)
+        {
+            int closest_x, closest_y, closest_dist = 1e3;
+            init_tiles(map, dd);
+            playerQuery.each([&](const Position& pos, ExploreMap& exploreMap) {
+                for (int y = 0; y < dd.height; ++y)
+                    for (int x = 0; x < dd.width; ++x)
+                    {
+                        if (dd.tiles[y * dd.width + x] != dungeon::floor)
+                            continue;
+                        if (is_tile_in_range(pos.x, pos.y, x, y, exploreMap.dist))
+                        {
+                            exploreMap.explored[y * dd.width + x] = true;
+                        }
+                        int curDist = get_range(pos.x, pos.y, x, y);
+                        if (!exploreMap.explored[y * dd.width + x] && curDist < closest_dist)
+                        {
+                            closest_x = x;
+                            closest_y = y;
+                            closest_dist = curDist;
+                        }
+                    }
+                map[closest_y * dd.width + closest_x] = 0.f;
+                });
+            process_dmap(map, dd);
+        });
+}
